@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Bilder & Videos hochladen</title>
+<style>
+  body {
+    font-family: -apple-system, Segoe UI, Roboto, sans-serif;
+    background: #f5f4f0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 40px 20px;
+    color: #2b2b2b;
+    margin: 0;
+  }
+  .card {
+    background: white;
+    border-radius: 16px;
+    padding: 32px;
+    max-width: 480px;
+    width: 100%;
+    box-shadow: 0 2px 20px rgba(0,0,0,0.08);
+    text-align: center;
+    box-sizing: border-box;
+  }
+  h1 { font-size: 1.4em; margin-bottom: 8px; }
+  p.sub { color: #777; margin-bottom: 24px; font-size: 0.95em; }
+  #dropzone {
+    border: 2px dashed #c8a97e;
+    border-radius: 12px;
+    padding: 30px 15px;
+    cursor: pointer;
+    transition: background 0.2s;
+  }
+  #dropzone.dragover { background: #f0e9de; }
+  input[type="file"] { display: none; }
+  #fileList { text-align: left; margin-top: 16px; font-size: 0.9em; }
+  .fileItem { padding: 8px 0; border-bottom: 1px solid #eee; }
+  .fileItem .name { display: flex; justify-content: space-between; }
+  .progressBar { height: 6px; background: #eee; border-radius: 3px; margin-top: 6px; overflow: hidden; }
+  .progressFill { height: 100%; background: #c8a97e; width: 0%; transition: width 0.2s; }
+  .status { font-size: 0.85em; }
+  .status.ok { color: #2e7d32; }
+  .status.err { color: #c62828; }
+  .status.pending { color: #999; }
+  button {
+    margin-top: 20px;
+    background: #c8a97e;
+    color: white;
+    border: none;
+    padding: 12px 28px;
+    border-radius: 8px;
+    font-size: 1em;
+    cursor: pointer;
+  }
+  button:disabled { opacity: 0.5; cursor: default; }
+  #doneMsg { margin-top: 16px; color: #2e7d32; font-weight: 600; display: none; }
+</style>
+</head>
+<body>
+  <div class="card">
+    <h1>📸 Bilder & Videos hochladen</h1>
+    <p class="sub">Wähle deine Fotos/Videos aus oder ziehe sie hierher.</p>
+    <div id="dropzone" onclick="document.getElementById('fileInput').click()">
+      Hier klicken oder Dateien reinziehen
+    </div>
+    <input type="file" id="fileInput" multiple accept="image/*,video/*">
+    <div id="fileList"></div>
+    <button id="uploadBtn" onclick="startUpload()" disabled>Hochladen</button>
+    <div id="doneMsg">✅ Danke! Alles wurde hochgeladen.</div>
+  </div>
+
+<script>
+  // ==== KONFIGURATION ====
+  // Hier die /exec URL deines Apps-Script-Deployments eintragen:
+  var SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbwsEMBV85PAOYH8PARRqveFDZw4TGqHB5tfdmXqRSjxbQnqLcsGopD4GEKmpSSrGF5E_Q/exec';
+
+  var CHUNK_SIZE = 4 * 1024 * 1024; // 4 MB pro Chunk
+
+  var selectedFiles = [];
+  var dropzone = document.getElementById('dropzone');
+  var fileInput = document.getElementById('fileInput');
+  var fileListEl = document.getElementById('fileList');
+  var uploadBtn = document.getElementById('uploadBtn');
+
+  fileInput.addEventListener('change', function(e) { addFiles(e.target.files); });
+
+  dropzone.addEventListener('dragover', function(e) {
+    e.preventDefault();
+    dropzone.classList.add('dragover');
+  });
+  dropzone.addEventListener('dragleave', function() {
+    dropzone.classList.remove('dragover');
+  });
+  dropzone.addEventListener('drop', function(e) {
+    e.preventDefault();
+    dropzone.classList.remove('dragover');
+    addFiles(e.dataTransfer.files);
+  });
+
+  function addFiles(fileListObj) {
+    for (var i = 0; i < fileListObj.length; i++) {
+      selectedFiles.push(fileListObj[i]);
+    }
+    renderList();
+  }
+
+  function renderList() {
+    fileListEl.innerHTML = '';
+    selectedFiles.forEach(function(f, idx) {
+      var div = document.createElement('div');
+      div.className = 'fileItem';
+      div.innerHTML =
+        '<div class="name"><span>' + f.name + '</span>' +
+        '<span class="status pending" id="status-' + idx + '">wartet</span></div>' +
+        '<div class="progressBar"><div class="progressFill" id="progress-' + idx + '"></div></div>';
+      fileListEl.appendChild(div);
+    });
+    uploadBtn.disabled = selectedFiles.length === 0;
+  }
+
+  function startUpload() {
+    uploadBtn.disabled = true;
+    uploadNext(0);
+  }
+
+  function uploadNext(idx) {
+    if (idx >= selectedFiles.length) {
+      document.getElementById('doneMsg').style.display = 'block';
+      return;
+    }
+    uploadFile(selectedFiles[idx], idx).then(function() {
+      uploadNext(idx + 1);
+    }).catch(function() {
+      uploadNext(idx + 1);
+    });
+  }
+
+  function uploadFile(file, idx) {
+    var statusEl = document.getElementById('status-' + idx);
+    var progressEl = document.getElementById('progress-' + idx);
+    var uploadId = 'u' + Date.now() + '_' + Math.random().toString(36).slice(2, 10);
+    var totalChunks = Math.max(1, Math.ceil(file.size / CHUNK_SIZE));
+
+    statusEl.textContent = 'lädt...';
+    statusEl.className = 'status pending';
+
+    var chunkIndex = 0;
+
+    function sendChunk() {
+      var start = chunkIndex * CHUNK_SIZE;
+      var end = Math.min(file.size, start + CHUNK_SIZE);
+      var slice = file.slice(start, end);
+
+      return readAsBase64(slice).then(function(base64) {
+        var body = JSON.stringify({
+          uploadId: uploadId,
+          chunkIndex: chunkIndex,
+          totalChunks: totalChunks,
+          fileName: file.name,
+          mimeType: file.type || 'application/octet-stream',
+          data: base64
+        });
+
+        return fetch(SCRIPT_URL, {
+          method: 'POST',
+          headers: { 'Content-Type': 'text/plain;charset=utf-8' }, // vermeidet CORS-Preflight
+          body: body
+        }).then(function(res) { return res.json(); }).then(function(json) {
+          if (!json.success) throw new Error(json.error || 'Unbekannter Fehler');
+
+          progressEl.style.width = Math.round(((chunkIndex + 1) / totalChunks) * 100) + '%';
+
+          chunkIndex++;
+          if (chunkIndex < totalChunks) {
+            return sendChunk();
+          } else {
+            statusEl.textContent = 'fertig';
+            statusEl.className = 'status ok';
+          }
+        });
+      });
+    }
+
+    return sendChunk().catch(function(err) {
+      statusEl.textContent = 'Fehler';
+      statusEl.className = 'status err';
+      console.error(err);
+    });
+  }
+
+  function readAsBase64(blob) {
+    return new Promise(function(resolve, reject) {
+      var reader = new FileReader();
+      reader.onload = function() { resolve(reader.result.split(',')[1]); };
+      reader.onerror = reject;
+      reader.readAsDataURL(blob);
+    });
+  }
+</script>
+</body>
+</html>
