@@ -153,10 +153,10 @@
 
   #doneMsg {
     margin-top: 18px;
-    color: var(--sage);
-    font-family: 'Cormorant Garamond', serif;
-    font-size: 1.15em;
-    font-style: italic;
+    color: var(--gold);
+    font-size: 0.85em;
+    font-weight: 500;
+    letter-spacing: 0.28em;
     display: none;
   }
 </style>
@@ -476,10 +476,10 @@ l79 -74 -26 -13 c-24 -13 -38 -13 -104 1 -14 3 -36 7 -50 10 -14 3 -36 7 -50
       </g>
     </svg>
     <div class="eyebrow" style="font-family:'Great Vibes', cursive; font-size:2.6em; letter-spacing:0.02em; text-transform:none; color:var(--ink); font-style:normal; line-height:1.2;">Melanie &amp; Sascha</div>
-    <div style="font-size:0.85em; font-weight:500; letter-spacing:0.28em; color:var(--gold); margin-bottom:18px;">12.07.2026</div>
-    <h1>Wir sammeln alle<br>Fotos & Videos</h1>
+    <div style="font-size:0.72em; letter-spacing:0.28em; color:var(--gold); margin-bottom:18px;">12.07.2026</div>
+    <h1>Wir sammeln alle<br>Fotos und Videos</h1>
     <div class="divider"></div>
-    <p class="sub">Bitte ladet alle eure Fotos & Videos ganz einfach hoch —<br>kein Login nötig, nur wir sehen die Sammlung.</p>
+    <p class="sub">Ladet eure Fotos und Videos vom Tag ganz einfach hoch — kein Login nötig, und nur wir sehen die Sammlung.</p>
     <div id="dropzone" onclick="document.getElementById('fileInput').click()">
       Zum Auswählen tippen oder Dateien hierher ziehen
     </div>
@@ -494,7 +494,7 @@ l79 -74 -26 -13 c-24 -13 -38 -13 -104 1 -14 3 -36 7 -50 10 -14 3 -36 7 -50
   // Hier die /exec URL deines Apps-Script-Deployments eintragen:
   var SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbwsEMBV85PAOYH8PARRqveFDZw4TGqHB5tfdmXqRSjxbQnqLcsGopD4GEKmpSSrGF5E_Q/exec';
 
-  var CHUNK_SIZE = 4 * 1024 * 1024; // 4 MB pro Chunk
+  var CHUNK_SIZE = 8 * 1024 * 1024; // 8 MB pro Chunk – die meisten Fotos passen in einen einzigen Chunk
 
   var selectedFiles = [];
   var dropzone = document.getElementById('dropzone');
@@ -540,19 +540,26 @@ l79 -74 -26 -13 c-24 -13 -38 -13 -104 1 -14 3 -36 7 -50 10 -14 3 -36 7 -50
 
   function startUpload() {
     uploadBtn.disabled = true;
-    uploadNext(0);
-  }
+    var CONCURRENCY = 3;
+    var nextIndex = 0;
+    var remaining = selectedFiles.length;
 
-  function uploadNext(idx) {
-    if (idx >= selectedFiles.length) {
-      document.getElementById('doneMsg').style.display = 'block';
-      return;
+    function runNext() {
+      if (nextIndex >= selectedFiles.length) return;
+      var idx = nextIndex++;
+      uploadFile(selectedFiles[idx], idx).catch(function() {}).then(function() {
+        remaining--;
+        if (remaining === 0) {
+          document.getElementById('doneMsg').style.display = 'block';
+        } else {
+          runNext();
+        }
+      });
     }
-    uploadFile(selectedFiles[idx], idx).then(function() {
-      uploadNext(idx + 1);
-    }).catch(function() {
-      uploadNext(idx + 1);
-    });
+
+    for (var i = 0; i < Math.min(CONCURRENCY, selectedFiles.length); i++) {
+      runNext();
+    }
   }
 
   function uploadFile(file, idx) {
